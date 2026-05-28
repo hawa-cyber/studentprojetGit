@@ -2,19 +2,25 @@
 main.py — Point d'entrée du projet GitQuest.
 
 Modes d'utilisation :
-    python main.py                         → démo avec données fictives (étape 1)
-    python main.py <chemin_depot>          → affiche un vrai dépôt Git (étape 2)
-    python main.py <chemin_depot> --loop   → boucle interactive (étape 3)
+    python main.py                         -> demo avec donnees fictives
+    python main.py <chemin_depot>          -> affiche un vrai depot Git
+    python main.py <chemin_depot> --loop   -> boucle interactive
+    python main.py <chemin_depot> --graph  -> visualisation graphique matplotlib
+
+Note :
+    git_reader est importé en lazy dans chaque fonction qui en a besoin :
+    la démo (étape 1) n'appelle pas git et ne doit pas en avoir besoin.
+    git_graph est importé en lazy uniquement pour le mode --graph afin
+    d'éviter de charger matplotlib (~3 secondes) inutilement.
 """
 
 import io
 import subprocess
 import sys
 
+from comparaison import creer_arbre_cible, etats_identiques
 from display import afficher_deux_colonnes, afficher_encadre
-from git_graph import afficher_graphique
-from git_reader import read_repo
-from git_tree import Commit, GitTree
+from git_tree import GitTree
 
 # Forcer l'encodage UTF-8 sur Windows (évite les erreurs cp1252 dans le terminal)
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -26,53 +32,30 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 # ─────────────────────────────────────────────────────────────────────────────
 
 def demo_arbre_arbitraire() -> None:
-    """Construit un arbre Git fictif à la main et l'affiche.
+    """Affiche l'arbre cible comme démonstration de l'outil.
 
-    Sert à valider la fonction d'affichage indépendamment d'un vrai dépôt.
-    L'historique simulé est :
-
-        C0  ←  C1  ←  C2  (main / HEAD)
-                ↑
-                C3  (feature)
+    Réutilise creer_arbre_cible() pour éviter de dupliquer les données.
     """
-    print("\n" + "=" * 40)
-    print("  ETAPE 1 -- Arbre fictif (test)")
-    print("=" * 40 + "\n")
-
-    tree = GitTree()
-
-    tree.add_commit(Commit("d4e5f6g", "Initial commit",    parents=[],          refs=["tag: v1.0"]))
-    tree.add_commit(Commit("c3d4e5f", "Ajout README",      parents=["d4e5f6g"], refs=[]))
-    tree.add_commit(Commit("b2c3d4e", "Correction bug",    parents=["c3d4e5f"], refs=["HEAD -> main"]))
-    tree.add_commit(Commit("a1b2c3d", "Nouvelle fonction", parents=["c3d4e5f"], refs=["feature"]))
-
-    tree.display()
+    tree = creer_arbre_cible()
+    afficher_encadre(tree, commande="demo -- donnees fictives")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ÉTAPE 2 — Lecture d'un vrai dépôt Git
 # ─────────────────────────────────────────────────────────────────────────────
 
-def afficher_depot(chemin: str) -> GitTree:
-    """Lit un dépôt Git existant et affiche son arbre.
+def afficher_depot(chemin: str) -> None:
+    """Lit un dépôt Git existant et affiche son arbre en 3 colonnes.
 
     Args:
         chemin: Chemin vers le dépôt Git à lire.
-
-    Returns:
-        Le GitTree lu (réutilisable dans la boucle interactive).
     """
-    print(f"\n{'=' * 40}")
-    print(f"  ETAPE 2 -- Depot : {chemin}")
-    print(f"{'=' * 40}\n")
-
+    from git_reader import read_repo
     try:
         tree = read_repo(chemin)
         afficher_encadre(tree, commande=f"depot : {chemin}")
-        return tree
     except (ValueError, RuntimeError) as e:
         print(f"  [Erreur] {e}")
-        return GitTree()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,7 +66,7 @@ def executer_commande(commande: str, repo_path: str) -> None:
     """Exécute une commande shell dans le dépôt donné et affiche le résultat.
 
     Args:
-        commande: La commande shell à exécuter (ex: "git commit -m 'fix'").
+        commande: La commande shell à exécuter (ex : "git commit -m 'fix'").
         repo_path: Chemin vers le dépôt dans lequel exécuter la commande.
     """
     result = subprocess.run(
@@ -102,34 +85,45 @@ def executer_commande(commande: str, repo_path: str) -> None:
 
 
 def boucle_interactive(repo_path: str) -> None:
-    """Lance une boucle interactive de visualisation Git.
+    """Lance une boucle interactive de visualisation Git avec comparaison d'états.
 
     À chaque tour, la boucle :
-      1. Affiche l'arbre Git actuel du dépôt.
-      2. Demande une commande à l'utilisateur.
-      3. Exécute la commande dans le dépôt.
-      4. Répète jusqu'à la saisie de 'exit'.
+      1. Lit l'état actuel du dépôt.
+      2. Affiche l'état actuel et l'état cible côte à côte.
+      3. Vérifie si l'état cible est atteint.
+      4. Demande une commande à l'utilisateur.
+      5. Exécute la commande dans le dépôt.
+      6. Répète jusqu'à 'exit' ou jusqu'à l'atteinte de l'état cible.
 
     Args:
         repo_path: Chemin vers le dépôt Git à utiliser.
     """
+    from git_reader import read_repo
+
     print("\n" + "=" * 40)
-    print("  ETAPE 3 -- Mode interactif")
+    print("  Mode interactif")
+    print("  Objectif : atteindre l'etat cible.")
     print("  Tapez 'exit' pour quitter.")
     print("=" * 40)
 
+    tree_cible = creer_arbre_cible()
     derniere_commande = ""
 
     while True:
-        # Afficher l'état actuel du dépôt dans un cadre
         print()
         try:
-            tree = read_repo(repo_path)
-            afficher_encadre(tree, commande=derniere_commande)
+            tree_actuel = read_repo(repo_path)
+            afficher_deux_colonnes(tree_actuel, tree_cible, commande=derniere_commande)
         except (ValueError, RuntimeError) as e:
             print(f"  [Erreur lecture depot] {e}")
+            tree_actuel = GitTree()
 
-        # Lire la commande utilisateur
+        # Vérifier si l'objectif est atteint
+        if etats_identiques(tree_actuel, tree_cible):
+            print()
+            print("  Objectif atteint ! L'etat du depot correspond a la cible.")
+            break
+
         print()
         commande = input(">>> Commande (ou 'exit') : ").strip()
 
@@ -140,7 +134,6 @@ def boucle_interactive(repo_path: str) -> None:
         if not commande:
             continue
 
-        # Exécuter la commande et afficher la sortie
         print()
         executer_commande(commande, repo_path)
         derniere_commande = commande
@@ -152,26 +145,23 @@ def boucle_interactive(repo_path: str) -> None:
 
 def main() -> None:
     """Analyse les arguments et lance le mode correspondant."""
-    print("=" * 40)
-    print("      GitQuest -- Visualiseur Git")
-    print("=" * 40)
 
     if len(sys.argv) == 1:
-        # Aucun argument → démo données fictives
         demo_arbre_arbitraire()
-        print("\n  Astuce : python main.py <depot>          → vrai depot")
-        print("  Astuce : python main.py <depot> --loop   → mode interactif\n")
+        print("\n  python main.py <depot>          -> vrai depot")
+        print("  python main.py <depot> --loop   -> mode interactif")
+        print("  python main.py <depot> --graph  -> graphique matplotlib\n")
 
     elif len(sys.argv) == 2:
-        # Un argument → lire un vrai dépôt
         afficher_depot(sys.argv[1])
 
     elif len(sys.argv) == 3 and sys.argv[2] == "--loop":
-        # Deux arguments avec --loop → boucle interactive
         boucle_interactive(sys.argv[1])
 
     elif len(sys.argv) == 3 and sys.argv[2] == "--graph":
-        # Mode graphique matplotlib (style learngitbranching)
+        # Imports lazy : matplotlib (~3s) et git_reader chargés seulement ici
+        from git_graph import afficher_graphique
+        from git_reader import read_repo
         try:
             tree = read_repo(sys.argv[1])
             afficher_graphique(tree, titre=f"Git — {sys.argv[1]}")
@@ -180,10 +170,10 @@ def main() -> None:
 
     else:
         print("Usage :")
-        print("  python main.py                         -> demo donnees fictives")
-        print("  python main.py <depot>                 -> afficher un vrai depot")
-        print("  python main.py <depot> --loop          -> mode interactif")
-        print("  python main.py <depot> --graph         -> graphique (style learngitbranching)")
+        print("  python main.py                        -> demo")
+        print("  python main.py <depot>                -> afficher depot")
+        print("  python main.py <depot> --loop         -> mode interactif")
+        print("  python main.py <depot> --graph        -> graphique")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 """
 git_graph.py — Affichage graphique de l'arbre Git avec matplotlib.
-Inspiré de learngitbranching.js.org : cercles, flèches, étiquettes colorées.
+Chaque branche (colonne) a une couleur distincte : cercles, flèches et
+étiquettes suivent la même couleur, ce qui rend le graphe lisible
+quel que soit le nombre de commits.
 """
 
 import matplotlib.pyplot as plt
@@ -12,181 +14,204 @@ from git_tree import GitTree
 # Constantes visuelles
 # ─────────────────────────────────────────────
 
-COULEUR_FOND     = "#4db8e8"   # bleu vif identique à learngitbranching
-COULEUR_NOEUD    = "#6ab0c8"   # cercle bleu-gris (commits normaux)
-COULEUR_HEAD     = "#3d5a6b"   # cercle plus sombre pour HEAD
-COULEUR_TEXTE    = "white"
-COULEUR_FLECHE   = "#1a5f7a"   # flèches bleu foncé
+COULEUR_FOND  = "#1e1e2e"   # fond sombre (style terminal moderne)
+COULEUR_HEAD  = "#f38ba8"   # rose vif pour le commit HEAD
+COULEUR_TEXTE = "white"
 
-RAYON            = 0.30        # rayon des cercles
-ESPACEMENT_Y     = 1.6         # espace vertical entre commits
-ESPACEMENT_X     = 1.8         # espace horizontal entre colonnes
+RAYON        = 0.40    # rayon des cercles
+ESPACEMENT_Y = 2.2     # espace vertical entre commits
+ESPACEMENT_X = 2.5     # espace horizontal entre colonnes
+
+# Une couleur distincte par colonne (branche).
+# Le cycle recommence si le dépôt a plus de colonnes que de couleurs.
+_PALETTE = [
+    "#c792ea",  # violet
+    "#82aaff",  # bleu clair
+    "#c3e88d",  # vert clair
+    "#ffcb6b",  # jaune
+    "#89ddff",  # cyan
+    "#f78c6c",  # orange
+    "#f07178",  # rouge rosé
+    "#b2ccd6",  # gris bleu
+]
+
+
+def _couleur_col(col: int) -> str:
+    """Retourne la couleur associée à une colonne (cycle sur la palette).
+
+    Args:
+        col: Indice de la colonne.
+
+    Returns:
+        Code couleur hexadécimal.
+    """
+    return _PALETTE[col % len(_PALETTE)]
 
 
 # ─────────────────────────────────────────────
-# Calcul des positions
+# Calcul du layout
 # ─────────────────────────────────────────────
 
-def _compute_positions(tree: GitTree) -> dict[str, tuple[float, float]]:
-    """Calcule la position graphique (x, y) de chaque commit.
-
-    Utilise le même algorithme de colonnes que l'affichage texte :
-    chaque branche occupe une colonne (axe x).
-    Le commit le plus ancien est en haut (y maximal).
+def _compute_layout(tree: GitTree) -> tuple[dict, dict]:
+    """Calcule en un seul passage les positions (x, y) et les colonnes de chaque commit.
 
     Args:
         tree: L'arbre Git à positionner.
 
     Returns:
-        Dictionnaire hash -> (x, y) en coordonnées matplotlib.
+        Tuple (positions, colonnes) :
+            positions = {hash: (x, y)}
+            colonnes  = {hash: indice_colonne}
     """
-    commits = tree._topological_sort()   # newest first
     positions: dict[str, tuple[float, float]] = {}
-    lanes: list[str | None] = []
+    colonnes:  dict[str, int] = {}
 
-    for idx, commit in enumerate(commits):
-        # y = idx → newest (idx=0) en bas, oldest en haut
-        y = float(idx) * ESPACEMENT_Y
+    for idx, (commit, col) in enumerate(tree.lane_assignments()):
+        positions[commit.hash] = (float(col) * ESPACEMENT_X, float(idx) * ESPACEMENT_Y)
+        colonnes[commit.hash]  = col
 
-        # Trouver ou assigner la colonne du commit
-        col = next((i for i, v in enumerate(lanes) if v == commit.hash), None)
-        if col is None:
-            col = len(lanes)
-            lanes.append(commit.hash)
-
-        positions[commit.hash] = (float(col) * ESPACEMENT_X, y)
-
-        # Mettre à jour les colonnes
-        if not commit.parents:
-            lanes[col] = None
-        else:
-            lanes[col] = commit.parents[0]
-            for extra in commit.parents[1:]:
-                placed = False
-                for i, val in enumerate(lanes):
-                    if val is None:
-                        lanes[i] = extra
-                        placed = True
-                        break
-                if not placed:
-                    lanes.append(extra)
-
-        while lanes and lanes[-1] is None:
-            lanes.pop()
-
-    return positions
+    return positions, colonnes
 
 
 # ─────────────────────────────────────────────
 # Dessin des éléments
 # ─────────────────────────────────────────────
 
-def _dessiner_fleches(ax: plt.Axes, tree: GitTree, positions: dict) -> None:
+def _dessiner_fleches(
+    ax: plt.Axes,
+    tree: GitTree,
+    positions: dict,
+    colonnes: dict,
+) -> None:
     """Dessine les flèches entre commits (enfant → parent).
+
+    Chaque flèche prend la couleur de la branche du commit enfant,
+    ce qui permet de suivre visuellement chaque branche.
 
     Args:
         ax: L'axe matplotlib sur lequel dessiner.
         tree: L'arbre Git.
         positions: Dictionnaire hash -> (x, y).
+        colonnes: Dictionnaire hash -> indice de colonne.
     """
     for commit in tree.commits.values():
         if commit.hash not in positions:
             continue
-        cx, cy = positions[commit.hash]
+        cx, cy  = positions[commit.hash]
+        couleur = _couleur_col(colonnes.get(commit.hash, 0))
 
         for parent_hash in commit.parents:
             if parent_hash not in positions:
                 continue
-            px, py = positions[parent_hash]
-
-            # Courbure si branches différentes (x différents)
-            courbure = "arc3,rad=0.2" if cx != px else "arc3,rad=0.0"
+            px, py   = positions[parent_hash]
+            courbure = "arc3,rad=0.25" if cx != px else "arc3,rad=0.0"
 
             ax.annotate(
                 "",
-                xy=(px, py - RAYON),        # pointe → parent
-                xytext=(cx, cy + RAYON),     # queue  → commit
+                xy=(px, py - RAYON),       # pointe de la flèche → parent
+                xytext=(cx, cy + RAYON),   # queue de la flèche  → commit
                 arrowprops=dict(
                     arrowstyle="-|>",
-                    color=COULEUR_FLECHE,
-                    lw=2.0,
+                    color=couleur,
+                    lw=2.5,
                     connectionstyle=courbure,
                 ),
                 zorder=2,
             )
 
 
-def _dessiner_noeuds(ax: plt.Axes, tree: GitTree, positions: dict) -> None:
-    """Dessine les cercles et étiquettes de chaque commit.
+def _dessiner_noeuds(
+    ax: plt.Axes,
+    tree: GitTree,
+    positions: dict,
+    colonnes: dict,
+) -> None:
+    """Dessine les cercles, hashes courts et étiquettes de chaque commit.
+
+    La couleur de chaque cercle correspond à sa colonne (branche),
+    sauf pour le commit HEAD qui est mis en évidence en rose.
 
     Args:
         ax: L'axe matplotlib sur lequel dessiner.
         tree: L'arbre Git.
         positions: Dictionnaire hash -> (x, y).
+        colonnes: Dictionnaire hash -> indice de colonne.
     """
     for commit in tree.commits.values():
         if commit.hash not in positions:
             continue
-        x, y = positions[commit.hash]
-
+        x, y    = positions[commit.hash]
+        col     = colonnes.get(commit.hash, 0)
+        couleur = _couleur_col(col)
         is_head = any("HEAD" in ref for ref in commit.refs)
 
         # ── Cercle du commit ─────────────────────────────────────────────────
-        cercle = plt.Circle(
+        ax.add_patch(plt.Circle(
             (x, y), RAYON,
-            color=COULEUR_HEAD if is_head else COULEUR_NOEUD,
+            color=COULEUR_HEAD if is_head else couleur,
             zorder=3,
-            linewidth=2,
+            linewidth=2.5,
             edgecolor="white",
-        )
-        ax.add_patch(cercle)
+        ))
 
-        # Hash court affiché dans le cercle
+        # Hash court au centre du cercle
         ax.text(
             x, y,
-            commit.hash[:4],
+            commit.hash[:5],
             ha="center", va="center",
-            color=COULEUR_TEXTE,
-            fontsize=7, fontweight="bold",
+            color="white",
+            fontsize=8, fontweight="bold",
             zorder=4,
         )
 
+        # Message court affiché sous le cercle uniquement pour les commits
+        # "importants" : ceux qui ont des références (branches/tags) ou
+        # qui sont des commits de fusion (plusieurs parents).
+        # Sur un grand dépôt, afficher le message de chaque commit
+        # créerait un mur de texte illisible.
+        est_important = commit.refs or len(commit.parents) > 1
+        if est_important:
+            msg = commit.message[:25] + "…" if len(commit.message) > 25 else commit.message
+            ax.text(
+                x, y - RAYON - 0.20,
+                msg,
+                ha="center", va="top",
+                color="#aaaaaa",
+                fontsize=7.5,
+                zorder=4,
+            )
+
         # ── Étiquettes (branches, tags, HEAD) ────────────────────────────────
         for i, ref in enumerate(commit.refs):
-
             if "HEAD ->" in ref:
-                # Branche courante → étiquette verte
-                label    = ref.replace("HEAD -> ", "") + "  ✦"
-                bg       = "#00d26a"
-                fg       = "black"
+                nom    = ref.replace("HEAD -> ", "")
+                nom    = nom[:20] + "…" if len(nom) > 20 else nom
+                label  = nom + "  ✦"
+                bg, fg = "#00d26a", "black"
             elif ref.strip() == "HEAD":
-                # HEAD détaché
-                label    = "HEAD"
-                bg       = "#f39c12"
-                fg       = "black"
+                label  = "HEAD"
+                bg, fg = COULEUR_HEAD, "black"
             elif "tag:" in ref:
-                # Tag → étiquette violette
-                label    = ref.replace("tag: ", "◆ ")
-                bg       = "#9b59b6"
-                fg       = "white"
+                nom    = ref.replace("tag: ", "")
+                nom    = nom[:20] + "…" if len(nom) > 20 else nom
+                label  = "◆ " + nom
+                bg, fg = "#9b59b6", "white"
             else:
-                # Autre branche → étiquette bleue claire
-                label    = ref
-                bg       = "#87ceeb"
-                fg       = "black"
+                label  = ref[:22] + "…" if len(ref) > 22 else ref
+                bg, fg = couleur, "black"
 
             ax.text(
-                x + RAYON + 0.12,
-                y + 0.20 - i * 0.38,
+                x + RAYON + 0.15,
+                y + 0.30 - i * 0.55,
                 f" {label} ",
                 ha="left", va="center",
-                fontsize=9, fontweight="bold",
+                fontsize=11, fontweight="bold",
                 color=fg,
                 bbox=dict(
-                    boxstyle="round,pad=0.25",
+                    boxstyle="round,pad=0.30",
                     facecolor=bg,
                     edgecolor="white",
-                    linewidth=0.8,
+                    linewidth=1.2,
                 ),
                 zorder=5,
             )
@@ -199,52 +224,47 @@ def _dessiner_noeuds(ax: plt.Axes, tree: GitTree, positions: dict) -> None:
 def afficher_graphique(tree: GitTree, titre: str = "Arbre Git") -> None:
     """Affiche l'arbre Git sous forme de graphe visuel avec matplotlib.
 
-    Style inspiré de learngitbranching.js.org :
-    - Cercles bleus pour les commits
-    - Flèches grises vers les parents
-    - Étiquettes colorées pour les branches
-    - Fond bleu foncé
+    Chaque branche (colonne) a une couleur distincte, inspiré du style
+    GitKraken / learngitbranching.js.org.
+    Le graphe est scrollable et zoomable grâce à la barre d'outils matplotlib :
+    utiliser le bouton loupe ou la molette pour naviguer sur les grands dépôts.
 
     Args:
         tree: L'arbre Git à afficher.
-        titre: Titre de la fenêtre.
+        titre: Titre de la fenêtre matplotlib.
 
     Example:
         tree = read_repo(".")
         afficher_graphique(tree, titre="Mon dépôt")
     """
-    commits = tree._topological_sort()
+    positions, colonnes = _compute_layout(tree)
 
-    if not commits:
+    if not positions:
         print("  Dépôt vide — rien à afficher.")
         return
 
-    positions = _compute_positions(tree)
-
-    # Taille de la figure selon le nombre de commits et colonnes
-    n_cols = max(int(p[0] / ESPACEMENT_X) for p in positions.values()) + 1
-    n_rows = len(commits)
-    fig_w  = max(5, n_cols * 3.5)
-    fig_h  = max(5, n_rows * 1.8)
+    n_cols = max(colonnes.values()) + 1 if colonnes else 1
+    n_rows = len(positions)
+    fig_w  = max(6, n_cols * 4.0)
+    fig_h  = max(6, n_rows * 1.8)
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.set_facecolor(COULEUR_FOND)
     fig.patch.set_facecolor(COULEUR_FOND)
 
-    # Dessin dans l'ordre : flèches → nœuds → étiquettes
-    _dessiner_fleches(ax, tree, positions)
-    _dessiner_noeuds(ax, tree, positions)
+    # Dessin dans l'ordre : flèches d'abord, nœuds par-dessus
+    _dessiner_fleches(ax, tree, positions, colonnes)
+    _dessiner_noeuds(ax, tree, positions, colonnes)
 
-    # Mise en page
     all_x = [p[0] for p in positions.values()]
     all_y = [p[1] for p in positions.values()]
 
-    ax.set_xlim(min(all_x) - 0.8,  max(all_x) + 2.8)
-    ax.set_ylim(min(all_y) - 0.8,  max(all_y) + 0.8)
+    ax.set_xlim(min(all_x) - 0.8,  max(all_x) + 3.5)
+    ax.set_ylim(min(all_y) - 1.0,  max(all_y) + 1.0)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(titre, color=COULEUR_TEXTE, fontsize=13,
-                 fontweight="bold", pad=12)
+    ax.set_title(titre, color=COULEUR_TEXTE, fontsize=14,
+                 fontweight="bold", pad=15)
 
     plt.tight_layout()
     plt.show()

@@ -1,5 +1,9 @@
+# Fichiers compilés Python (générés automatiquement)
 __pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python 
+*.pyc
+
+# Exports matplotlib (images générées par --graph)
+*.png
+
+# IDE
+.vscode/
