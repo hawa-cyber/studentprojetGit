@@ -1,7 +1,7 @@
 # GitQuest — Visualiseur d'arbres Git
 
 Outil de visualisation d'arbres Git développé en Python dans le cadre d'un projet
-tutoré (IUT Clermont-Auvergne, BUT Science des Données, 2eme annee).
+tutoré (IUT Clermont-Auvergne, BUT Science des Données, 2ème année).
 
 Deux modes d'affichage :
 - Terminal encadré avec 3 colonnes alignées (références, arbre, hash + message)
@@ -13,13 +13,14 @@ Deux modes d'affichage :
 
 ```
 Dossier/
-├── main.py           Point d'entree — gere les 4 modes d'utilisation
-├── git_tree.py       Structure de donnees GitTree, tri topologique (algorithme de Kahn)
-├── git_reader.py     Lecture d'un vrai depot Git via subprocess
-├── display.py        Affichage encadre dans le terminal avec rich
+├── main.py           Point d'entrée — gère les 5 modes d'utilisation
+├── git_tree.py       Structure de données GitTree, tri topologique (algorithme de Kahn)
+├── git_reader.py     Lecture d'un vrai dépôt Git via subprocess
+├── display.py        Affichage encadré dans le terminal avec rich
 ├── git_graph.py      Affichage graphique avec matplotlib (une couleur par branche)
-├── comparaison.py    Etat cible et comparaison topologique d'arbres Git
-├── requirements.txt  Dependances Python
+├── comparaison.py    État cible par défaut et comparaison topologique d'arbres Git
+├── question.py       [NOUVEAU] Outil enseignant : création et chargement de questions
+├── requirements.txt  Dépendances Python
 └── .gitignore
 ```
 
@@ -35,41 +36,28 @@ pip install -r requirements.txt
 
 ## Utilisation
 
-Le chemin du depot peut etre absolu ou relatif.
-Si le terminal est déjà dans le dossier du depot, utiliser `.` comme chemin.
-
-### Mode demo (donnees fictives)
+### Mode démo (données fictives)
 
 ```
 python main.py
 ```
 
 Affiche un arbre Git fictif avec 4 commits et 2 branches.
-Ne necessite pas de depot Git ni de git installe sur la machine.
 
-### Afficher un depot existant
+### Afficher un dépôt existant
 
 ```
 python main.py <chemin_depot>
 ```
 
-Exemples :
-
-```
-python main.py C:/projets/mon-projet
-python main.py .
-```
-
-### Mode interactif
+### Mode interactif (question par défaut)
 
 ```
 python main.py <chemin_depot> --loop
 ```
 
-Affiche l'etat actuel du depot et l'etat cible cote a cote dans le terminal.
-L'utilisateur entre des commandes Git une par une.
-La session se termine automatiquement quand l'etat cible est atteint,
-ou manuellement avec la commande `exit`.
+Affiche l'état actuel du dépôt et l'état cible côte à côte dans le terminal.
+La session se termine quand l'état cible est atteint ou avec `exit`.
 
 ### Affichage graphique
 
@@ -77,90 +65,72 @@ ou manuellement avec la commande `exit`.
 python main.py <chemin_depot> --graph
 ```
 
-Ouvre une fenetre matplotlib avec :
-- Fond sombre, une couleur distincte par branche (violet, bleu, vert, orange...)
-- Cercles colores contenant le hash court du commit
-- Fleches colorees vers les commits parents
-- Etiquettes de branches et tags visibles uniquement sur les commits portant des references
-- Message court affiché uniquement pour les commits importants (branch tips, merges)
-- Noms de branches tronques a 20 caracteres pour la lisibilite
-
-Le graphe est scrollable et zoomable avec la barre d'outils matplotlib
-(molette ou bouton loupe).
-
 ---
 
-## Format d'affichage terminal
+## Fonctionnalité Enseignant — Créer une question
 
-L'affichage terminal utilise 3 colonnes :
+### Étape 1 — Préparer le dépôt cible
+
+L'enseignant prépare un dépôt Git dans l'état que les étudiants devront atteindre.
+Par exemple : créer deux branches, effectuer des commits, créer un tag.
+
+### Étape 2 — Sauvegarder l'état comme question
 
 ```
-  HEAD -> main    ●          a1b2c3d   Correction bug
-  feature         | ●        b2c3d4e   Nouvelle fonction
-                  |/
-  tag: v1.0       ●          c3d4e5f   Initial commit
+python main.py <chemin_depot> --save-target question1.json
 ```
 
-- Colonne gauche  : branches, tags et HEAD avec symboles UTF-8
-- Colonne centre  : graphe de l'arbre (noeuds, lignes verticales, convergences)
-- Colonne droite  : hash court (7 caracteres) et message du commit
+Avec une description de l'objectif :
 
-Symboles utilises :
+```
+python main.py <chemin_depot> --save-target question1.json --desc "Créer une branche feature avec 2 commits"
+```
 
-| Symbole  | Signification               |
-|----------|-----------------------------|
-| HEAD ->  | Branche courante (HEAD)     |
-| branch   | Autre branche nommee        |
-| tag:     | Tag Git                     |
-| /        | Convergence de deux branches|
+Cela génère un fichier `question1.json` contenant la structure Git cible.
 
----
+### Étape 3 — Distribuer la question aux étudiants
 
-## Dependances
+L'enseignant distribue le fichier `question1.json` aux étudiants.
 
-- **rich** >= 13.0.0 : affichage encadre et colore dans le terminal
-- **matplotlib** >= 3.7.0 : affichage graphique (mode --graph uniquement)
+### Étape 4 — L'étudiant résout la question
 
-`git_reader` et `git_graph` sont importes en lazy : ils ne sont charges
-que quand le mode correspondant est demande. La demo ne necessite donc
-ni git installe ni matplotlib.
+```
+python main.py <chemin_depot_etudiant> --loop --target question1.json
+```
+
+L'outil affiche côte à côte l'état actuel du dépôt de l'étudiant et l'état cible.
+Quand les deux états correspondent, la session se termine automatiquement.
 
 ---
 
-## Algorithmes
+## Format du fichier de question (JSON)
 
-### Tri topologique — git_tree.py
+```json
+{
+  "description": "Créer une branche feature avec 2 commits",
+  "commits": [
+    {
+      "hash": "a1b2c3d",
+      "message": "Initial commit",
+      "parents": [],
+      "refs": ["tag: v1.0"]
+    },
+    {
+      "hash": "b2c3d4e",
+      "message": "Ajout README",
+      "parents": ["a1b2c3d"],
+      "refs": ["HEAD -> main"]
+    }
+  ]
+}
+```
 
-Algorithme de Kahn (BFS avec degres entrants) : garantit que chaque commit
-apparait avant ses parents dans la liste resultante.
-Complexite : O(n + m) avec n commits et m relations parent-enfant.
-
-### Attribution des colonnes — git_tree.py
-
-Un tableau `lanes` maintient l'etat des colonnes actives.
-Chaque entree contient le hash attendu dans cette colonne.
-Le premier parent d'un commit reste dans sa colonne ; les parents
-supplementaires (fusions) occupent les premieres colonnes libres.
-Cette logique est exposee via `lane_assignments()` pour que `git_graph.py`
-puisse l'utiliser sans dupliquer le code.
-
-### Comparaison d'etats — comparaison.py
-
-La fonction `etats_identiques` compare deux arbres Git en deux etapes :
-1. Verifier que les noms de branches sont identiques.
-2. Pour chaque branche, comparer la forme canonique de son historique.
-
-La forme canonique d'un commit est definie de facon recursive :
-    forme(commit) = (message, (forme(parent_1), forme(parent_2), ...))
-
-Les parents sont tries pour que l'ordre de listing ne compte pas.
-Le calcul est iteratif (du plus ancien au plus recent) pour eviter
-tout depassement de pile sur les grands depots.
-Les hashes ne sont jamais compares : deux depots ayant le meme historique
-mais des hashes differents sont correctement identifies comme identiques.
+Les fichiers JSON peuvent être créés manuellement ou via `--save-target`.
 
 ---
 
-## Auteur
+## Références
 
-Projet tutoré — IUT Clermont-Auvergne, BUT Science des Données, 2eme annee.
+- Dépôt original : https://github.com/denis-migdal-Student-projects/GitQuest
+- Fork personnel : https://github.com/hawa-cyber/studentprojetGit
+- Documentation Git : https://git-scm.com/doc

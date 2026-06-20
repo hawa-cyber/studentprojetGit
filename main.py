@@ -2,10 +2,13 @@
 main.py — Point d'entrée du projet GitQuest.
 
 Modes d'utilisation :
-    python main.py                         -> demo avec donnees fictives
-    python main.py <chemin_depot>          -> affiche un vrai depot Git
-    python main.py <chemin_depot> --loop   -> boucle interactive
-    python main.py <chemin_depot> --graph  -> visualisation graphique matplotlib
+    python main.py                                      -> demo avec données fictives
+    python main.py <chemin_depot>                       -> affiche un vrai dépôt Git
+    python main.py <chemin_depot> --loop                -> boucle interactive (question par défaut)
+    python main.py <chemin_depot> --graph               -> visualisation graphique matplotlib
+    python main.py <chemin_depot> --save-target <f.json>          -> [ENSEIGNANT] sauvegarde l'état comme question
+    python main.py <chemin_depot> --save-target <f.json> --desc X -> [ENSEIGNANT] idem avec description
+    python main.py <chemin_depot> --loop --target <f.json>        -> [ÉTUDIANT] résout une question
 
 Note :
     git_reader est importé en lazy dans chaque fonction qui en a besoin :
@@ -84,7 +87,7 @@ def executer_commande(commande: str, repo_path: str) -> None:
         print(f"[stderr] {result.stderr.strip()}")
 
 
-def boucle_interactive(repo_path: str) -> None:
+def boucle_interactive(repo_path: str, tree_cible: GitTree) -> None:
     """Lance une boucle interactive de visualisation Git avec comparaison d'états.
 
     À chaque tour, la boucle :
@@ -96,7 +99,8 @@ def boucle_interactive(repo_path: str) -> None:
       6. Répète jusqu'à 'exit' ou jusqu'à l'atteinte de l'état cible.
 
     Args:
-        repo_path: Chemin vers le dépôt Git à utiliser.
+        repo_path:   Chemin vers le dépôt Git à utiliser.
+        tree_cible:  L'arbre Git cible à atteindre (question de l'enseignant).
     """
     from git_reader import read_repo
 
@@ -106,7 +110,6 @@ def boucle_interactive(repo_path: str) -> None:
     print("  Tapez 'exit' pour quitter.")
     print("=" * 40)
 
-    tree_cible = creer_arbre_cible()
     derniere_commande = ""
 
     while True:
@@ -140,40 +143,124 @@ def boucle_interactive(repo_path: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# FONCTIONNALITÉ ENSEIGNANT — Sauvegarde d'un état cible
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sauvegarder_question(repo_path: str, fichier_sortie: str,
+                         description: str = "") -> None:
+    """Capture l'état actuel d'un dépôt et le sauvegarde comme question JSON.
+
+    Workflow enseignant :
+        1. Préparer un dépôt Git dans l'état que les étudiants doivent atteindre.
+        2. Lancer : python main.py <depot> --save-target question.json
+        3. Distribuer le fichier question.json aux étudiants.
+        4. Les étudiants lancent : python main.py <leur_depot> --loop --target question.json
+
+    Args:
+        repo_path:      Chemin vers le dépôt Git à capturer.
+        fichier_sortie: Chemin du fichier JSON à créer.
+        description:    Description textuelle de l'objectif (optionnelle).
+    """
+    from git_reader import read_repo
+    from question import sauvegarder_cible
+
+    try:
+        tree = read_repo(repo_path)
+        afficher_encadre(tree, commande=f"état capturé depuis : {repo_path}")
+        sauvegarder_cible(tree, fichier_sortie, description)
+    except (ValueError, RuntimeError) as e:
+        print(f"  [Erreur] {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Point d'entrée
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _afficher_aide() -> None:
+    """Affiche l'aide complète avec tous les modes disponibles."""
+    print("""
+Usage :
+  python main.py                                           demo (données fictives)
+  python main.py <depot>                                   afficher un dépôt
+  python main.py <depot> --loop                            mode interactif (question par défaut)
+  python main.py <depot> --graph                           visualisation graphique
+
+  [Enseignant]
+  python main.py <depot> --save-target <fichier.json>      sauvegarder l'état comme question
+  python main.py <depot> --save-target <f.json> --desc X   idem avec une description
+
+  [Étudiant]
+  python main.py <depot> --loop --target <fichier.json>    résoudre une question
+""")
+
+
 def main() -> None:
     """Analyse les arguments et lance le mode correspondant."""
+    args = sys.argv[1:]
 
-    if len(sys.argv) == 1:
+    # ── Aucun argument → démo ─────────────────────────────────────────────
+    if not args:
         demo_arbre_arbitraire()
-        print("\n  python main.py <depot>          -> vrai depot")
-        print("  python main.py <depot> --loop   -> mode interactif")
-        print("  python main.py <depot> --graph  -> graphique matplotlib\n")
+        _afficher_aide()
+        return
 
-    elif len(sys.argv) == 2:
-        afficher_depot(sys.argv[1])
+    depot = args[0]
 
-    elif len(sys.argv) == 3 and sys.argv[2] == "--loop":
-        boucle_interactive(sys.argv[1])
+    # ── --save-target <fichier> [--desc <texte>] ──────────────────────────
+    if "--save-target" in args:
+        idx = args.index("--save-target")
+        if idx + 1 >= len(args):
+            print("  [Erreur] --save-target requiert un nom de fichier.")
+            print("  Exemple : python main.py <depot> --save-target question.json")
+            return
+        fichier = args[idx + 1]
+        description = ""
+        if "--desc" in args:
+            idx_desc = args.index("--desc")
+            if idx_desc + 1 < len(args):
+                description = args[idx_desc + 1]
+        sauvegarder_question(depot, fichier, description)
+        return
 
-    elif len(sys.argv) == 3 and sys.argv[2] == "--graph":
-        # Imports lazy : matplotlib (~3s) et git_reader chargés seulement ici
+    # ── --loop [--target <fichier>] ───────────────────────────────────────
+    if "--loop" in args:
+        if "--target" in args:
+            idx = args.index("--target")
+            if idx + 1 >= len(args):
+                print("  [Erreur] --target requiert un nom de fichier JSON.")
+                print("  Exemple : python main.py <depot> --loop --target question.json")
+                return
+            from question import charger_cible
+            try:
+                tree_cible = charger_cible(args[idx + 1])
+            except (FileNotFoundError, ValueError) as e:
+                print(f"  [Erreur] {e}")
+                return
+        else:
+            # Question par défaut (état cible codé dans comparaison.py)
+            tree_cible = creer_arbre_cible()
+        boucle_interactive(depot, tree_cible)
+        return
+
+    # ── --graph ───────────────────────────────────────────────────────────
+    if "--graph" in args:
         from git_graph import afficher_graphique
         from git_reader import read_repo
         try:
-            tree = read_repo(sys.argv[1])
-            afficher_graphique(tree, titre=f"Git — {sys.argv[1]}")
+            tree = read_repo(depot)
+            afficher_graphique(tree, titre=f"Git — {depot}")
         except (ValueError, RuntimeError) as e:
             print(f"  [Erreur] {e}")
+        return
 
-    else:
-        print("Usage :")
-        print("  python main.py                        -> demo")
-        print("  python main.py <depot>                -> afficher depot")
-        print("  python main.py <depot> --loop         -> mode interactif")
-        print("  python main.py <depot> --graph        -> graphique")
+    # ── Affichage simple d'un dépôt ───────────────────────────────────────
+    if len(args) == 1:
+        afficher_depot(depot)
+        return
+
+    # ── Argument inconnu ──────────────────────────────────────────────────
+    print(f"  [Erreur] Option inconnue : {args[1:]}")
+    _afficher_aide()
 
 
 if __name__ == "__main__":

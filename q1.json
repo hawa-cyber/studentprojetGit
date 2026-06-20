@@ -1,0 +1,42 @@
+{
+  "description": "",
+  "commits": [
+    {
+      "hash": "5103681",
+      "message": "Initial commit",
+      "parents": [],
+      "refs": [
+        "origin/master",
+        "origin/HEAD",
+        "master"
+      ]
+    },
+    {
+      "hash": "b3479ec",
+      "message": "coucou migdal",
+      "parents": [
+        "5103681"
+      ],
+      "refs": []
+    },
+    {
+      "hash": "9ad64b7",
+      "message": "complete feat",
+      "parents": [
+        "b3479ec"
+      ],
+      "refs": []
+    },
+    {
+      "hash": "2fd0221",
+      "message": "refactoring",
+      "parents": [
+        "9ad64b7"
+      ],
+      "refs": [
+        "HEAD -> ma-feature",
+        "origin/ma-feature"
+      ]
+    }
+  ]
+}
